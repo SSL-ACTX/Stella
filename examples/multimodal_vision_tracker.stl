@@ -1,0 +1,48 @@
+terminal in tensor[4, 4] raw_frame;
+terminal in target_class;
+terminal out tensor[2, 2] pooled_features;
+terminal out classification_result;
+terminal out tracking_locked;
+
+const EDGE_KERNEL = [
+    [-1.0,  1.0],
+    [ 1.0, -1.0]
+];
+
+node tensor[4, 4] feature_map;
+node tensor[2, 2] pooled;
+node cand_a : hold;
+node cand_b : hold;
+node tracking_error : leak(0.9);
+
+feature_map = conv2d(raw_frame, kernel: EDGE_KERNEL, stride: 1, padding: same);
+pooled = avgpool2d(feature_map, kernel_size: 2, stride: 2);
+pooled ~> pooled_features;
+
+cand_a = pooled[0, 0] * 1.5;
+cand_b = pooled[1, 1] * 1.5;
+
+compete {
+    cand_a;
+    cand_b;
+} resolve winner_take_all(0.4);
+
+classification_result = cand_a * 1.0 + cand_b * 0.5;
+tracking_error = (classification_result - target_class) |> saturate;
+
+phase AutonomousTracker {
+    state Searching {
+        drift Locked when tracking_error < 0.2;
+    }
+    state Locked {
+        drift Searching when tracking_error > 0.6;
+    }
+}
+
+tracking_locked = state.Locked;
+
+probe "error", tracking_error;
+probe "locked", tracking_locked;
+probe "class", classification_result;
+
+assert stable;

@@ -1,0 +1,17 @@
+[package]
+name = "stella_compiler"
+version = "0.2.0"
+edition = "2021"
+description = "Compiler middle-end, neural synthesizer, and chaotic basis optimizer for Project Stella"
+
+[dependencies]
+stella_core = { path = "../stella_core" }
+stella_frontend = { path = "../stella_frontend" }
+bumpalo = { version = "3.20", default-features = false }
+postcard = { version = "1.1", default-features = false, features = ["alloc"] }
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+libm = "0.2"
+
+[features]
+default = ["std"]
+std = ["stella_core/std", "stella_frontend/std", "serde/std", "postcard/use-std"]

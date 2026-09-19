@@ -1,0 +1,23 @@
+terminal in error_sig;
+terminal out ctrl_gain;
+terminal out tracking_locked;
+
+node integrator : leak(0.95);
+
+phase ServoController {
+    state Acquiring {
+        integrator = error_sig * 0.8;
+        drift Locked when error_sig < 0.15;
+    }
+
+    state Locked {
+        integrator = error_sig * 0.1;
+        drift Acquiring when error_sig > 0.65;
+    }
+}
+
+ctrl_gain = state.Acquiring * 0.9 + state.Locked * 0.15;
+tracking_locked = state.Locked;
+
+probe "gain", ctrl_gain;
+probe "locked", tracking_locked;

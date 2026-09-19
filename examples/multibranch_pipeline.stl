@@ -1,0 +1,14 @@
+terminal in raw_sensor;
+terminal out norm_out;
+terminal out inv_out;
+terminal out emergency_cutoff;
+
+node status_bus : hold;
+
+raw_sensor ~> (
+    |> saturate * 1.5 |> relu ~> [norm_out, status_bus],
+    |> inv * 0.75 ~> inv_out,
+    |> step * 2.0 ~> emergency_cutoff
+);
+
+assert stable;

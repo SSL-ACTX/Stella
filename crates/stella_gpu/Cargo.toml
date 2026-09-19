@@ -1,0 +1,20 @@
+[package]
+name = "stella_gpu"
+version = "0.2.0"
+edition = "2021"
+description = "Extensible GPU acceleration backend for Project Stella neural VM"
+
+[dependencies]
+stella_core = { path = "../stella_core" }
+rayon = "1.8.1"
+
+# Target-specific: Only compile and link radb on Android/Termux
+[target.'cfg(target_os = "android")'.dependencies]
+radb = { package = "ruri", git = "https://github.com/SSL-ACTX/ruri" }
+
+[features]
+default = ["android-radb"]
+android-radb = []
+native-vulkan = []
+gpu-tests = []
+radb-tests = ["gpu-tests", "android-radb"]

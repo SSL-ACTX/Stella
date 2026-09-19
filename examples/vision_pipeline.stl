@@ -1,0 +1,25 @@
+terminal in tensor[4, 4] sensor_frame;
+terminal out tensor[2, 2] pooled_features;
+terminal out alert_trigger;
+
+const EDGE_KERNEL = [
+    [-1.0,  1.0],
+    [ 1.0, -1.0]
+];
+
+node tensor[4, 4] edge_map;
+node tensor[2, 2] pooled;
+node detector_latch : latch;
+
+edge_map = conv2d(sensor_frame, kernel: EDGE_KERNEL, stride: 1, padding: same);
+pooled = avgpool2d(edge_map, kernel_size: 2, stride: 2);
+
+pooled ~> pooled_features;
+
+probe "feature_center", pooled[0, 0];
+
+if pooled[0, 0] > 0.45 {
+    detector_latch = 1.0;
+}
+
+detector_latch ~> alert_trigger;

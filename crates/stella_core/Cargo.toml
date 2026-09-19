@@ -1,0 +1,14 @@
+[package]
+name = "stella_core"
+version = "0.2.0"
+edition = "2021"
+description = "High-performance no_std continuous-state neural VM core"
+
+[dependencies]
+libm = { version = "0.2", default-features = false }
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+rayon = { version = "1.8.1", optional = true }
+
+[features]
+default = ["std"]
+std = ["serde/std", "rayon"]

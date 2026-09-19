@@ -1,0 +1,12 @@
+terminal in clk_trigger;
+terminal in read_addr;
+terminal in write_addr;
+terminal in data_in;
+terminal out data_out;
+
+node vec[4] memory_bank : hold;
+
+memory_bank[write_addr] = data_in when clk_trigger >= 0.5;
+data_out = memory_bank[read_addr];
+
+probe "readout", data_out;

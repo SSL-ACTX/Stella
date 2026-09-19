@@ -1,0 +1,83 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#extension GL_EXT_shader_16bit_storage : require
+
+// Stella Neural Swarm GEMM — Native FP16 Single-Step Dispatch Kernel
+// S_{t+1}[N, B] = clamp(W[N, N] * S_t[N, B] + Bias[N], 0.0, 1.0)
+//
+// Optimizations:
+// - Native 16-bit storage (float16_t): 2x memory bandwidth reduction
+// - Native f16vec4 vector dot-product: dual-issue FP16 execution units on ARM Mali
+// - Shared-memory tiling with 16-bit precision
+
+#define TILE 16
+
+layout(local_size_x = TILE, local_size_y = TILE) in;
+
+layout(push_constant) uniform PC {
+    uint N;
+    uint B;
+    uint step;
+} pc;
+
+layout(std430, binding = 0) readonly buffer W  { float16_t weights[]; };
+layout(std430, binding = 1) readonly buffer Bs { float16_t biases[];  };
+layout(std430, binding = 2) buffer S0          { float16_t state0[];  };
+layout(std430, binding = 3) buffer S1          { float16_t state1[];  };
+
+shared float16_t sw[TILE][TILE];
+shared float16_t ss[TILE][TILE];
+
+void main() {
+    uint col = gl_GlobalInvocationID.x;
+    uint row = gl_GlobalInvocationID.y;
+
+    uint lx = gl_LocalInvocationID.x;
+    uint ly = gl_LocalInvocationID.y;
+
+    bool valid_col = col < pc.B;
+    bool valid_row = row < pc.N;
+
+    uint n = pc.N;
+    uint b = pc.B;
+    uint num_tiles = (n + uint(TILE) - 1u) / uint(TILE);
+
+    float16_t sum = valid_row ? biases[row] : float16_t(0.0);
+
+    for (uint t = 0u; t < num_tiles; ++t) {
+        uint k_base = t * uint(TILE);
+
+        uint wk = k_base + lx;
+        sw[ly][lx] = (valid_row && wk < n) ? weights[row * n + wk] : float16_t(0.0);
+
+        uint sk = k_base + ly;
+        if ((pc.step & 1u) == 0u) {
+            ss[ly][lx] = (sk < n && valid_col) ? state0[sk * b + col] : float16_t(0.0);
+        } else {
+            ss[ly][lx] = (sk < n && valid_col) ? state1[sk * b + col] : float16_t(0.0);
+        }
+
+        barrier();
+
+        uint lim = min(uint(TILE), n - k_base);
+        for (uint i = 0u; i + 3u < lim; i += 4u) {
+            f16vec4 w4 = f16vec4(sw[ly][i], sw[ly][i+1u], sw[ly][i+2u], sw[ly][i+3u]);
+            f16vec4 s4 = f16vec4(ss[i][lx], ss[i+1u][lx], ss[i+2u][lx], ss[i+3u][lx]);
+            sum += dot(w4, s4);
+        }
+        for (uint i = (lim & ~3u); i < lim; ++i) {
+            sum += sw[ly][i] * ss[i][lx];
+        }
+
+        barrier();
+    }
+
+    if (valid_row && valid_col) {
+        float16_t clamped = clamp(sum, float16_t(0.0), float16_t(1.0));
+        if ((pc.step & 1u) == 0u) {
+            state1[row * b + col] = clamped;
+        } else {
+            state0[row * b + col] = clamped;
+        }
+    }
+}

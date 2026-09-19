@@ -1,0 +1,20 @@
+circuit FilterNode<decay = 0.85, gain = 1.2>(in raw, out filtered) {
+    node acc : leak(0.85);
+    acc = raw * gain;
+    acc ~> filtered;
+}
+
+terminal in sig_a;
+terminal in sig_b;
+terminal out winner_a;
+terminal out winner_b;
+
+inst f_a = FilterNode<0.90, 1.0>(sig_a, winner_a);
+inst f_b = FilterNode<0.80, 1.5>(sig_b, winner_b);
+
+compete {
+    winner_a;
+    winner_b;
+} resolve winner_take_all(0.5);
+
+assert stable;

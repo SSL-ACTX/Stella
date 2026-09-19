@@ -1,0 +1,35 @@
+circuit HebbianAssociator<decay = 0.005, gain = 1.2>(in sensory, in context, out association) {
+    node trace_cell : leak(0.95);
+    trace_cell = sensory * gain + context * 0.2;
+    synapse sensory ~> association {
+        plastic: true;
+        rule: hebbian;
+        rate: 0.05;
+        decay: 0.005;
+    }
+}
+
+terminal in [2] write_addr;
+terminal in [2] read_addr;
+terminal in clk_pulse;
+terminal in key_stream;
+terminal out memory_readout;
+terminal out [2] classified_state;
+
+node [4] associative_ram : hold;
+node raw_readout : hold;
+node status_bus : latch;
+
+associative_ram[write_addr] = key_stream when clk_pulse >= 0.5;
+raw_readout = associative_ram[read_addr];
+
+raw_readout ~> (
+    |> saturate * 1.5 |> relu ~> classified_state[0],
+    |> inv * 0.8 ~> classified_state[1],
+    |> step * 2.0 ~> status_bus
+);
+
+inst assoc = HebbianAssociator<0.01, 0.08>(raw_readout, status_bus, memory_readout);
+
+probe "read_out", memory_readout;
+probe "status", status_bus;
