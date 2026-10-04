@@ -1,0 +1,360 @@
+// crates/stella_frontend/src/stella.pest
+// =============================================================================
+// Stella: Continuous Synaptic Manifold Language
+// A pure, modern Odin & Functional PEG Grammar
+// =============================================================================
+
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT    = _{ ("/*" ~ (!"*/" ~ ANY)* ~ "*/") | ("//" ~ (!"\n" ~ ANY)*) }
+
+ident      = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+int_lit    = @{ ASCII_DIGIT+ }
+float_lit  = @{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+number     = @{ ("+" | "-")? ~ (float_lit | int_lit) }
+string_lit = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+opt_semi   = _{ ";"? }
+
+// =============================================================================
+// Module Entry Point
+// =============================================================================
+program    = { SOI ~ (item ~ opt_semi)* ~ EOI }
+item       = { (attribute | phase_block | basin_block | flow_stmt | decl) ~ opt_semi }
+
+// =============================================================================
+// Attributes & Contracts (#[stable], ^stable, ^|x| <= 1.0, #[cloak(...)])
+// =============================================================================
+attr_val   = { attr_list | shape | number | string_lit | ident }
+attr_list  = { "[" ~ attr_val ~ ("," ~ attr_val)* ~ ","? ~ "]" }
+attr_named = { ident ~ ":" ~ attr_val }
+attr_arg   = { attr_named | attr_val }
+attr_args  = { attr_arg ~ ("," ~ attr_arg)* ~ ","? }
+attribute  = {
+    ("#[" ~ ident ~ ("(" ~ attr_args? ~ ")")? ~ "]" ~ opt_semi)
+    | ("^" ~ ident ~ ("(" ~ attr_args? ~ ")")? ~ opt_semi)
+    | ("^|" ~ ident ~ "|" ~ ("<=" | "<") ~ number ~ opt_semi)
+}
+
+// =============================================================================
+// Types & Shapes (Odin style: [4, 4], [16])
+// =============================================================================
+shape_dim  = { int_lit }
+shape      = { "[" ~ shape_dim ~ ("," ~ shape_dim)* ~ ","? ~ "]" }
+type_spec  = { shape | ident }
+
+type_decl  = { "type" ~ ident ~ "=" ~ shape ~ opt_semi }
+
+// =============================================================================
+// Declarations: Ports (in / out) & Stateful Nodes
+// =============================================================================
+port_item  = { ident ~ (shape)? ~ (":" ~ type_spec)? }
+in_decl    = {
+    ("+>" ~ port_item ~ ("," ~ port_item)* ~ opt_semi)
+    | ("in " ~ port_item ~ ("," ~ port_item)* ~ opt_semi)
+    | ("in\t" ~ port_item ~ ("," ~ port_item)* ~ opt_semi)
+    | ("in\n" ~ port_item ~ ("," ~ port_item)* ~ opt_semi)
+}
+out_decl   = {
+    ("=>" ~ port_item ~ ("," ~ port_item)* ~ opt_semi)
+    | ("out " ~ port_item ~ ("," ~ port_item)* ~ opt_semi)
+    | ("out\t" ~ port_item ~ ("," ~ port_item)* ~ opt_semi)
+    | ("out\n" ~ port_item ~ ("," ~ port_item)* ~ opt_semi)
+}
+
+dyn_leak      = { ("leak" ~ "(" ~ (number | ident) ~ ")") | ("~" ~ !("+" | "-" | ">" | "[" | "|" | "(") ~ (number | ident)) }
+dyn_latch     = { "latch" }
+dyn_hold      = { "hold" | ("&" ~ "hold") }
+dyn_plastic   = { "plastic" ~ ("(" ~ number ~ ("," ~ number)? ~ ")")? }
+dyn_osc       = { (("oscillator" | "orbit") ~ "(" ~ int_lit ~ ")") | ("@" ~ int_lit) }
+node_dynamics = { dyn_leak | dyn_latch | dyn_hold | dyn_plastic | dyn_osc }
+
+node_type_or_dyn = {
+    (":" ~ node_dynamics)
+    | (":" ~ type_spec ~ (":" ~ node_dynamics)?)
+    | node_dynamics
+}
+node_decl  = {
+    ("node" ~ ident ~ shape? ~ node_type_or_dyn? ~ ("=" ~ number)? ~ opt_semi)
+    | ("*" ~ ident ~ shape? ~ node_type_or_dyn? ~ ("=" ~ number)? ~ opt_semi)
+}
+
+// Constants (Scalar and Matrix)
+matrix_row = { "[" ~ number ~ ("," ~ number)* ~ ","? ~ "]" }
+matrix_lit = { "[" ~ matrix_row ~ ("," ~ matrix_row)* ~ ","? ~ "]" }
+const_val  = { matrix_lit | number }
+const_decl = { "const" ~ ident ~ (":" ~ type_spec)? ~ "=" ~ const_val ~ opt_semi }
+
+// Circuit Definitions (Parameterized Synaptic Subgraphs)
+template_param  = { ident ~ (":=" ~ number | "=" ~ number)? }
+template_params = { "<" ~ template_param ~ ("," ~ template_param)* ~ ","? ~ ">" }
+
+param_dir      = @{ ("+>" | "=>" | "inout" | "out" | "in") ~ !(ASCII_ALPHANUMERIC | "_") }
+circuit_param  = {
+    (param_dir ~ ident ~ shape? ~ (":" ~ type_spec)? ~ type_spec? ~ ("=" ~ number)?)
+    | (ident ~ shape? ~ ":" ~ param_dir? ~ type_spec? ~ ("=" ~ number)?)
+    | (ident ~ shape? ~ (":" ~ type_spec)? ~ type_spec? ~ ("=" ~ number)?)
+}
+circuit_params = { "(" ~ (circuit_param ~ ("," ~ circuit_param)* ~ ","?)? ~ ")" }
+circuit_return = { "->" ~ (param_dir? ~ ident | "(" ~ circuit_param ~ ")") }
+circuit_decl   = {
+    ("circuit" | "⌁") ~ ident ~ template_params? ~ circuit_params ~ circuit_return? ~ "{" ~ item* ~ "}"
+}
+
+// Circuit Instantiation: `inst_name := Circuit<...>(...)` or `inst inst_name = Circuit<...>(...)`
+template_args  = { "<" ~ number ~ ("," ~ number)* ~ ","? ~ ">" }
+inst_args      = { "(" ~ (node_target ~ ("," ~ node_target)* ~ ","?)? ~ ")" }
+inst_decl      = {
+    ("inst" ~ ident ~ ("=" | ":=" | ":") ~ scoped_ident ~ template_args? ~ inst_args ~ opt_semi)
+    | (ident ~ ":=" ~ scoped_ident ~ template_args? ~ inst_args ~ opt_semi)
+}
+
+scoped_ident = @{ ident ~ ("::" ~ ident)* }
+
+// Module Imports / Manifold Ingestion: `<- "path.stl" as mod;` or `use "path.stl": { A, B };`
+import_selective = { "{" ~ ident ~ ("," ~ ident)* ~ ","? ~ "}" }
+import_target    = { ("as" ~ ident) | (":" ~ import_selective) | import_selective }
+import_decl      = {
+    ("<-" ~ string_lit ~ import_target? ~ opt_semi)
+    | (("use" | "import") ~ string_lit ~ import_target? ~ opt_semi)
+}
+
+decl = {
+    import_decl
+    | type_decl
+    | const_decl
+    | in_decl
+    | out_decl
+    | node_decl
+    | circuit_decl
+    | inst_decl
+}
+
+slice_range   = { int_lit ~ ".." ~ int_lit }
+multi_index   = { int_lit ~ ("," ~ int_lit)+ }
+dynamic_addr  = { "@" ~ ident }
+target_index  = { multi_index | slice_range | dynamic_addr | int_lit | ident }
+
+node_target   = { scoped_ident ~ ("." ~ ident)? ~ ("[" ~ target_index ~ "]")? }
+target_bundle = {
+    "[" ~ node_target ~ ("," ~ node_target)+ ~ ","? ~ "]"
+}
+
+// =============================================================================
+// Expressions & Pratt Operator Hierarchy
+// =============================================================================
+expr = { prefix_op* ~ primary ~ postfix_op* ~ (bin_op ~ prefix_op* ~ primary ~ postfix_op*)* }
+
+bin_op = _{
+    op_or | op_nor | op_and | op_nand | op_xor |
+    op_eq | op_neq | op_gte | op_lte | op_gt | op_lt |
+    op_matmul | op_outer_prod |
+    op_add | op_sub | op_mul | op_div
+}
+op_or   = { "or" }
+op_nor  = { "nor" }
+op_and  = { "and" }
+op_nand = { "nand" }
+op_xor  = { "xor" }
+op_eq   = { "==" }
+op_neq  = { "!=" }
+op_gte  = { ">=" }
+op_lte  = { "<=" }
+op_gt   = { ">" }
+op_lt   = { "<" }
+op_matmul = { "@*" }
+op_outer_prod = { "^*" }
+op_add  = { "+" }
+op_sub  = { "-" }
+op_mul  = { "*" }
+op_div  = { "/" }
+
+prefix_op = _{ op_neg | op_not }
+op_neg = { "-" }
+op_not = { "not" }
+
+postfix_op = _{ pipe_activation | expr_call | expr_index }
+
+pipe_activation = { "|>" ~ activation_kind ~ ("*" ~ number)? }
+activation_kind = {
+    act_saturate | act_clamp | act_step | act_inv | act_relu |
+    act_curve | act_match
+}
+act_saturate = { "saturate" }
+act_clamp    = { "clamp" }
+act_step     = { "step" }
+act_inv      = { "inv" }
+act_relu     = { "relu" }
+curve_point  = { number ~ "=>" ~ number }
+act_curve    = { "curve" ~ "(" ~ "[" ~ curve_point ~ ("," ~ curve_point)* ~ ","? ~ "]" ~ ")" }
+act_match    = { "match" ~ "(" ~ string_lit ~ ")" }
+
+expr_index = { "[" ~ target_index ~ "]" }
+expr_call  = { template_args? ~ "(" ~ (expr ~ ("," ~ expr)* ~ ","?)? ~ ")" }
+
+primary = {
+    spatial_call
+    | state_ident
+    | number
+    | scoped_ident
+    | "(" ~ expr ~ ")"
+}
+
+state_ident = ${ ("state" | "basin") ~ "." ~ ident }
+
+// Spatial Operations (conv2d, avgpool2d)
+conv2d_arg = {
+    ("kernel" ~ ":" ~ ident)
+    | ("stride" ~ ":" ~ int_lit)
+    | ("padding" ~ ":" ~ ident)
+    | ident
+    | int_lit
+}
+conv2d_call = { "conv2d" ~ "(" ~ expr ~ ("," ~ conv2d_arg)+ ~ ")" }
+
+pool_arg = {
+    ("kernel_size" ~ ":" ~ int_lit)
+    | ("stride" ~ ":" ~ int_lit)
+    | int_lit
+}
+avgpool2d_call = { "avgpool2d" ~ "(" ~ expr ~ ("," ~ pool_arg)+ ~ ")" }
+spatial_call = { conv2d_call | avgpool2d_call }
+
+// =============================================================================
+// Synaptic Flows & Mixable Calculus
+// =============================================================================
+when_cond = { "when" ~ expr }
+
+conn_inhibit_resonant = { "<~|>" }
+conn_compete          = { "<||>" | "<|(" ~ number ~ ")|>" }
+conn_plastic_pos_bidir = { "<~+(" ~ (number | ident) ~ ("," ~ ("decay=")? ~ (number | ident))? ~ ")+~>" | "<~+~>" }
+conn_plastic_neg_bidir = { "<~-(" ~ (number | ident) ~ ("," ~ ("decay=")? ~ (number | ident))? ~ ")-~>" | "<~-~>" }
+conn_plastic_pos      = { "~+(" ~ (number | ident) ~ ("," ~ ("decay=")? ~ (number | ident))? ~ ")+>" | "~+>" }
+conn_plastic_neg      = { "~-(" ~ (number | ident) ~ ("," ~ ("decay=")? ~ (number | ident))? ~ ")->" | "~->" }
+conn_resonant         = { "<~>" }
+conn_synapse          = { "~>" }
+conn_inhibit          = { "~|>" }
+conn_weight           = { "~[" ~ number ~ "]>" }
+
+gate_spec  = { ("?" ~ expr) | ("(" ~ "gate" ~ ":" ~ expr ~ ")") | ("(" ~ expr ~ ")") }
+shunt_spec = { ("!" ~ "[" ~ expr ~ "]") | ("[" ~ "shunt" ~ ":" ~ expr ~ "]") }
+
+pipe_step  = { ("|>" ~ activation_kind ~ ("*" ~ number)?) | ("*" ~ number) }
+pipe_chain = { pipe_step+ }
+
+dest_bundle     = {
+    ("[" ~ (node_target ~ ("," ~ node_target)* ~ ","?)? ~ "]")
+    | ("(" ~ (node_target ~ ("," ~ node_target)* ~ ","?)? ~ ")")
+}
+branch_pipeline = { pipe_chain? ~ "~>" ~ (dest_bundle | node_target) }
+multi_branch    = { "(" ~ branch_pipeline ~ ("," ~ branch_pipeline)* ~ ","? ~ ")" }
+
+flow_dest = { multi_branch | target_bundle | node_target }
+plastic_mod = { "@" ~ node_target }
+
+flow_conn = {
+    (conn_synapse ~ gate_spec ~ conn_synapse)
+    | (conn_weight ~ shunt_spec ~ conn_synapse)
+    | (conn_synapse ~ shunt_spec ~ conn_synapse)
+    | (conn_weight ~ gate_spec ~ conn_synapse)
+    | conn_inhibit_resonant
+    | conn_compete
+    | conn_plastic_pos_bidir
+    | conn_plastic_neg_bidir
+    | conn_plastic_pos
+    | conn_plastic_neg
+    | conn_resonant
+    | conn_weight
+    | conn_inhibit
+    | conn_synapse
+}
+
+flow_link = { flow_conn ~ flow_dest ~ plastic_mod? }
+
+flow_src      = { (node_target ~ pipe_chain) | target_bundle | ("(" ~ expr ~ ")") | node_target }
+synaptic_flow = {
+    flow_src ~ flow_link+ ~ when_cond? ~ opt_semi
+}
+
+assign_op       = { "=" | "+=" | "-=" }
+assignment_flow = { node_target ~ assign_op ~ expr ~ when_cond? ~ opt_semi }
+
+probe_stmt  = { (("probe" | "print" | "?") ~ (string_lit ~ (":" | ",")?)? ~ expr ~ when_cond? ~ opt_semi) }
+emit_cond   = { ("when" ~ expr) | ("on" ~ ident) }
+emit_stmt   = { "emit" ~ string_lit ~ ("(" ~ expr ~ ("," ~ expr)* ~ ","? ~ ")")? ~ emit_cond? ~ opt_semi }
+return_stmt = { "return" ~ expr ~ opt_semi }
+drain_stmt  = { (("drain" | "!") ~ node_target ~ when_cond? ~ opt_semi) }
+learn_stmt  = { "learn" ~ node_target ~ "~>" ~ node_target ~ (":" ~ number ~ ("," ~ number)?)? ~ plastic_mod? ~ opt_semi }
+minimize_stmt = { ("minimize" | "∇") ~ expr ~ opt_semi }
+
+synapse_prop  = { ident ~ ":" ~ (number | ident) ~ opt_semi }
+synapse_block = { "synapse" ~ node_target ~ "~>" ~ node_target ~ "{" ~ synapse_prop* ~ "}" ~ opt_semi }
+
+then_block = { "{" ~ flow_stmt* ~ "}" }
+else_block = { "else" ~ "{" ~ flow_stmt* ~ "}" }
+if_flow    = { "if" ~ expr ~ then_block ~ else_block? }
+while_flow = { "while" ~ expr ~ "{" ~ flow_stmt* ~ "}" }
+
+// Lateral Competition & Continuous Superposition
+compete_branch = {
+    ident ~ ((":" ~ "{" ~ flow_stmt* ~ "}") | (":" ~ flow_stmt) | opt_semi)
+}
+compete_stmt = {
+    "compete" ~ "{" ~ compete_branch* ~ "}" ~ "resolve" ~ "winner_take_all" ~ ("(" ~ number ~ ")")? ~ opt_semi
+}
+
+relax_stmt = {
+    "relax" ~ "{" ~ flow_stmt* ~ "}" ~ "until" ~ "stable" ~ "(" ~ number ~ ")" ~ ("or" ~ "timeout" ~ "(" ~ int_lit ~ ")")? ~ opt_semi
+}
+
+superpose_branch = { ident ~ ":" ~ ("{" ~ flow_stmt* ~ "}" | flow_stmt) }
+superpose_stmt   = {
+    "superpose" ~ "{" ~ superpose_branch* ~ "}" ~ "collapse_on" ~ expr ~ "~>" ~ node_target ~ opt_semi
+}
+
+bifurcate_cond = {
+    ("<=" ~ number) | ("<" ~ number)
+    | (">=" ~ number) | (">" ~ number)
+    | ("==" ~ number) | ("=" ~ number)
+    | ("[" ~ number ~ ".." ~ number ~ "]")
+    | ("when" ~ expr)
+    | ("else")
+}
+bifurcate_branch = {
+    bifurcate_cond ~ (
+        ("~>" ~ node_target ~ opt_semi)
+        | ("->" ~ node_target ~ opt_semi)
+        | ("{" ~ flow_stmt* ~ "}")
+    )
+}
+bifurcate_stmt = { "bifurcate" ~ "(" ~ expr ~ ")" ~ "{" ~ bifurcate_branch* ~ "}" }
+
+flow_stmt = {
+    emit_stmt
+    | return_stmt
+    | probe_stmt
+    | drain_stmt
+    | learn_stmt
+    | minimize_stmt
+    | synapse_block
+    | if_flow
+    | while_flow
+    | compete_stmt
+    | relax_stmt
+    | superpose_stmt
+    | bifurcate_stmt
+    | synaptic_flow
+    | assignment_flow
+}
+
+// =============================================================================
+// Attractor Basins & Phase Automata
+// =============================================================================
+transition_stmt = {
+    ("self" ~ ("~>" | "->") ~ ident ~ when_cond? ~ opt_semi)
+    | ("->" ~ ident ~ when_cond? ~ opt_semi)
+    | ("when" ~ expr ~ ("~>" | "->") ~ ident ~ opt_semi)
+}
+
+basin_item  = { transition_stmt | flow_stmt }
+state_block = { ("state" | "§") ~ ident ~ "{" ~ basin_item* ~ "}" }
+phase_block = { ("phase" | "§") ~ ident ~ "{" ~ state_block+ ~ "}" }
+basin_block = { ("basin" | "§") ~ ident ~ "{" ~ basin_item* ~ "}" }

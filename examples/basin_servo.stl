@@ -1,0 +1,25 @@
+// Attractor Basin Phase Servo Controller
++> error_sig
+=> ctrl_gain, tracking_locked
+
+*integrator ~ 0.95
+^stable
+^|integrator| <= 1.0
+
+§ ServoController {
+    § Acquiring {
+        integrator = error_sig * 0.8
+        self ~> Locked when error_sig < 0.15
+    }
+
+    § Locked {
+        integrator = error_sig * 0.1
+        self ~> Acquiring when error_sig > 0.65
+    }
+}
+
+ctrl_gain = state.Acquiring * 0.9 + state.Locked * 0.15
+tracking_locked = state.Locked
+
+? "gain": ctrl_gain
+? "locked": tracking_locked

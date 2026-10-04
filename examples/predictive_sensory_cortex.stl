@@ -1,0 +1,59 @@
+// Neuromorphic Predictive Sensory Cortex with Modular Filter Manifolds & Hebbian Memory
+<- "examples/lib/sensory_filter.stl" as flt;
+
++> retina_patch[4], sensory_probe[2], dopamine_reward, clock_sync
+=> predicted_state, motor_drive, anomaly_alert, memory_trace[2, 2]
+
+*spatial_cue &hold
+*cortex_representation &hold
+*prediction_error ~ 0.8
+*lateral_inhibitor &hold
+*motor_integrator ~ 0.95
+*cortex_feature_map[2, 2]
+*encoding_vector[2]
+
+// Ingested modular spatial pooling and temporal filtering
+spatial_pooler := flt::ReceptiveFieldPooler(retina_patch, spatial_cue)
+edge_detector  := flt::TemporalEdgeFilter<0.8>(spatial_cue, cortex_representation)
+gain_stage     := flt::Normalizer<1.5>(cortex_representation, lateral_inhibitor)
+
+encoding_vector[0] = retina_patch[0]
+encoding_vector[1] = retina_patch[1]
+
+// Continuous prediction dynamics & outer product correlation trace
+prediction_error = (lateral_inhibitor - predicted_state) |> relu
+spatial_cue <~+(0.08, 0.005)+~> cortex_representation
+cortex_representation ~+(0.1, 0.01)+> predicted_state @ dopamine_reward
+
+cortex_feature_map = encoding_vector ^* sensory_probe
+cortex_feature_map ~> memory_trace
+
+cortex_representation ~> (
+    |> relu * 0.9      ~> motor_integrator,
+    |> saturate * 1.4  ~> motor_drive
+)
+
+// Dynamic attractor basin state machine with adaptive hysteresis
+§ CorticalPhaseEngine {
+    § Habituation {
+        self ~> Alert when prediction_error > 0.45
+    }
+    § Alert {
+        anomaly_alert = 1.0
+        self ~> Habituation when prediction_error <= 0.15
+    }
+}
+
+!lateral_inhibitor when clock_sync < 0.1
+
+? "err": prediction_error
+? "alert": anomaly_alert
+? "motor": motor_drive
+
+emit "Cortical discrepancy tripped! error={:.2}"(prediction_error) when anomaly_alert
+emit "Motor drive engaged: torque={:.2}"(motor_drive) when motor_drive >= 0.5
+emit "Predictive sensory cortex reached attractor equilibrium." on stable
+
+return anomaly_alert
+
+^stable

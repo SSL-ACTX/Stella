@@ -1,0 +1,14 @@
+// Dynamic Neural RAM with Gated Addressing
++> clk_trigger, read_addr, write_addr, data_in, key_vector[2], query_vector[2]
+=> data_out, assoc_matrix[2, 2]
+
+*memory_bank[4] &hold
+*correlation_map[2, 2]
+
+memory_bank[write_addr] = data_in when clk_trigger >= 0.5
+data_out = memory_bank[read_addr]
+
+correlation_map = key_vector ^* query_vector
+correlation_map ~> assoc_matrix
+
+? "readout": data_out

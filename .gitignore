@@ -1,0 +1,8 @@
+.env
+*.stella
+*.key
+
+dist/
+target/
+__pycache__/
+tmp/

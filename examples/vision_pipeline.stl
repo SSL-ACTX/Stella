@@ -1,0 +1,25 @@
+// Spatial 2D Vision Pipeline with Edge Convolution and Spatial Pooling
++> sensor_frame[4, 4]
+=> pooled_features[2, 2], alert_trigger
+
+const EDGE_KERNEL : [2, 2] = [
+    [-1.0,  1.0],
+    [ 1.0, -1.0]
+]
+
+*edge_map[4, 4]
+*pooled[2, 2]
+*detector_latch
+
+edge_map = conv2d(sensor_frame, kernel: EDGE_KERNEL, stride: 1, padding: same)
+pooled = avgpool2d(edge_map, kernel_size: 2, stride: 2)
+
+pooled ~> pooled_features
+
+? "feature_center": pooled[0, 0]
+
+if pooled[0, 0] > 0.45 {
+    detector_latch = 1.0
+}
+
+detector_latch ~> alert_trigger

@@ -1,0 +1,30 @@
+// Associative Neural Co-Processor with 3-Factor Neuromodulated Plasticity
+circuit HebbianAssociator<decay := 0.005, gain := 1.2>(+> sensory, +> context, => association) {
+    *trace_cell ~ 0.95
+    trace_cell = sensory * gain + context * 0.2
+    sensory <~+(0.05, decay)+~> trace_cell
+    sensory ~+(0.05, decay)+> association @ context
+}
+
++> write_addr[2], read_addr[2], clk_pulse, key_stream
+=> memory_readout, classified_state[2]
+
+*associative_ram[4] &hold
+*raw_readout &hold
+*status_bus
+
+associative_ram[write_addr] = key_stream when clk_pulse >= 0.5
+raw_readout = associative_ram[read_addr]
+
+raw_readout ~> (
+    |> saturate * 1.5 |> relu ~> classified_state[0],
+    |> inv * 0.8              ~> classified_state[1],
+    |> step * 2.0             ~> status_bus
+)
+
+assoc := HebbianAssociator<0.01, 0.08>(raw_readout, status_bus, memory_readout)
+
+!status_bus when clk_pulse < 0.1
+
+? "read_out": memory_readout
+? "status": status_bus

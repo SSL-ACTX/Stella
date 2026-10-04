@@ -1,0 +1,16 @@
+// Winner-Take-All Lateral Competition with Filter Circuits
+circuit FilterNode<decay := 0.85, gain := 1.2>(+> raw, => filtered) {
+    *acc ~ decay
+    acc = raw * gain
+    acc ~> filtered
+}
+
++> sig_a, sig_b
+=> winner_a, winner_b
+
+f_a := FilterNode<0.90, 1.0>(sig_a, winner_a)
+f_b := FilterNode<0.80, 1.5>(sig_b, winner_b)
+
+winner_a <||> winner_b
+
+^stable

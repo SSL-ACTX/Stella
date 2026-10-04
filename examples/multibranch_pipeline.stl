@@ -1,0 +1,13 @@
+// Multibranch Pipeline with In-line Activations and Broadcast Bundling
++> raw_sensor
+=> norm_out, inv_out, emergency_cutoff
+
+*status_bus &hold
+
+raw_sensor ~> (
+    |> saturate * 1.5 |> relu ~> [norm_out, status_bus],
+    |> inv * 0.75             ~> inv_out,
+    |> step * 2.0             ~> emergency_cutoff
+)
+
+^stable

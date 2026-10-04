@@ -1,0 +1,43 @@
+// Autonomous Multimodal Vision Tracker with Continuous Attractor Basins
++> raw_frame[4, 4], target_class
+=> pooled_features[2, 2], classification_result, tracking_locked
+
+const EDGE_KERNEL : [2, 2] = [
+    [-1.0,  1.0],
+    [ 1.0, -1.0]
+]
+
+*feature_map[4, 4]
+*pooled[2, 2]
+*cand_a &hold
+*cand_b &hold
+*tracking_error ~ 0.9
+
+feature_map = conv2d(raw_frame, kernel: EDGE_KERNEL, stride: 1, padding: same)
+pooled = avgpool2d(feature_map, kernel_size: 2, stride: 2)
+pooled ~> pooled_features
+
+cand_a = pooled[0, 0] * 1.5
+cand_b = pooled[1, 1] * 1.5
+
+cand_a <||> cand_b
+
+classification_result = cand_a * 1.0 + cand_b * 0.5
+tracking_error = (classification_result - target_class) |> saturate
+
+§ AutonomousTracker {
+    § Searching {
+        self ~> Locked when tracking_error < 0.2
+    }
+    § Locked {
+        self ~> Searching when tracking_error > 0.6
+    }
+}
+
+tracking_locked = state.Locked
+
+? "error": tracking_error
+? "locked": tracking_locked
+? "class": classification_result
+
+^stable

@@ -1,0 +1,22 @@
+// Spatial Sensory Filtering & Temporal Differentiation Manifold
+circuit TemporalEdgeFilter<leak_rate := 0.85>(+> raw_stream, => edge_signal) {
+    *prev_sample ~ leak_rate
+    *differentiated &hold
+
+    differentiated = (raw_stream - prev_sample) |> relu
+    raw_stream ~> prev_sample
+    differentiated ~> edge_signal
+}
+
+circuit Normalizer<gain := 1.25>(+> input_bus, => normalized) {
+    *scaled_state
+    scaled_state = input_bus * gain |> saturate
+    scaled_state ~> normalized
+}
+
+// Spatial Receptive Field Spatial Pooler (2D local contractive pooling)
+circuit ReceptiveFieldPooler(+> patch[4], => pooled_feature) {
+    *cell_sum &hold
+    cell_sum = patch[0] * 0.25 + patch[1] * 0.25 + patch[2] * 0.25 + patch[3] * 0.25
+    cell_sum |> clamp ~> pooled_feature
+}
